@@ -1,1 +1,39 @@
+cat > .github/workflows/deploy.yml << 'YAML'
+name: CI/CD Deploy to EC2
 
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Copy project to EC2
+        run: |
+          rsync -az --delete \
+            -e "ssh -i ~/.ssh/id_rsa" \
+            ./ ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:~/app/
+
+      - name: Build and restart container on EC2
+        run: |
+          ssh -i ~/.ssh/id_rsa ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} bash << 'ENDSSH'
+            cd ~/app
+            docker build -t flask-app .
+            docker stop flask-container 2>/dev/null || true
+            docker rm flask-container 2>/dev/null || true
+            docker run -d --name flask-container -p 5000:5000 flask-app
+          ENDSSH
+YAML
